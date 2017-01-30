@@ -73,7 +73,7 @@ func (p Packet) Serialize() []byte {
 type Frame []byte
 
 // reads the port for incomming bytes and frames out responses
-func ScanPort (port io.Reader, out chan Frame) {
+func ScanPort (port io.Reader, out chan Frame, kill chan bool) {
 	debug.Println("port scanner started")
 
 	// bring in a frame
@@ -81,8 +81,16 @@ func ScanPort (port io.Reader, out chan Frame) {
 	first := true
 	var frame Frame
 	for {
+		select {
+		case <- kill:
+			debug.Println("port scanner killed")
+			break
+		default:
+		}
+		
 		resp := make([]byte, 1)
-		port.Read(resp)
+		n, _ := port.Read(resp)
+		if n == 0 { continue }
 
 		if first {
 			len = int(resp[0])
@@ -139,7 +147,7 @@ func needACK(frames chan Frame) error {
 		debug.Println("got NAK [0x33]")
 		return errors.New("got NAK needed ACK")
 	} else {
-		return errors.New("unexpected data at needACK")
+		return errors.New(fmt.Sprintf("unexpected data in needACK: %#v", f))
 	}
 }
 
@@ -148,14 +156,16 @@ type Bootloader struct {
 	Frames chan Frame       // channel to recieve frames from
 }
 
-func (c Bootloader) Sync() {
+func (c Bootloader) Sync() error {
 	b := []byte{0x55, 0x55}
 	n, err := c.Port.Write(b)
 	if err != nil {
 		log.Fatalf("port.Write: %v", err)
+		return err
 	}
 	_ = n
-	needACK(c.Frames)
+	err = needACK(c.Frames)
+	return err
 }
 
 func (c Bootloader) Ping() bool {
