@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"errors"
 	"log"
+	"time"
 )
 
 const (
@@ -16,7 +17,7 @@ const (
 	FLASH_CTRL_DIECFG0 uint32 = 0x400D3014
         FLASH_CTRL_DIECFG2 uint32 = 0x400D301C
         IEEE_ADDR uint32 = 0x00280028
-	
+	ACKWAIT = 3 // seconds to wait for an ack
 )
 
 type commandCode int
@@ -139,15 +140,19 @@ func (f Frame) chipID() int {
 }
 
 func needACK(frames chan Frame) error {
-	f := <- frames
-	if f.isAck() {
-		debug.Println("got ACK [0xcc]")
-		return nil
-	} else if f.isNak() {
-		debug.Println("got NAK [0x33]")
-		return errors.New("got NAK needed ACK")
-	} else {
-		return errors.New(fmt.Sprintf("unexpected data in needACK: %#v", f))
+	select {
+	case f := <- frames:
+		if f.isAck() {
+			debug.Println("got ACK [0xcc]")
+			return nil
+		} else if f.isNak() {
+			debug.Println("got NAK [0x33]")
+			return errors.New("got NAK needed ACK")
+		} else {
+			return errors.New(fmt.Sprintf("unexpected data in needACK: %#v", f))
+		}
+	case <- time.After(ACKWAIT * time.Second):
+		return errors.New("timed out waiting for ACK")
 	}
 }
 
